@@ -85,7 +85,18 @@ Android 14 introduced strict rules for background tasks:
 
 ---
 
-## 8. Actionable Roadmap (Phase 2)
+## 8. Current Implementation Status (v2.0)
+
+We have successfully moved beyond the simulation phase by implementing the following core components:
+
+1.  **Permission Orchestration:** A new `SetupScreen` guides users through granting SMS and Notification permissions, essential for real-world data access.
+2.  **Native SMS Bridge:** Implemented a Kotlin `SmsReceiver` and `MethodChannel` that listens for incoming messages from "BOK" or "Bankak" and pushes them directly into the Flutter engine.
+3.  **Modular Architecture:** The project has been refactored into a clean structure (`/models`, `/services`, `/ui`), making it ready for production-scale development.
+4.  **Truth-Source Sync:** The SMS parser now extracts the absolute balance reported by the bank, preventing any calculation errors or "infinite balance" bugs.
+
+---
+
+## 9. Actionable Roadmap (Phase 2)
 
 ### Step 1: Infrastructure Upgrade
 - Replace `SharedPreferences` with `flutter_secure_storage`.
