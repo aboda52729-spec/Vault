@@ -23,7 +23,7 @@ class MainDashboard extends StatelessWidget {
             floating: true,
             backgroundColor: Colors.black,
             title: Text(
-              store.isArabic ? 'تحليلات بنكك' : 'Bankak Analytics',
+              store.isArabic ? 'Vault' : 'Vault',
               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 24),
             ),
             actions: [

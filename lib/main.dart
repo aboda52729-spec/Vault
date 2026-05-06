@@ -31,7 +31,7 @@ class BankakApp extends StatelessWidget {
     final store = Provider.of<BankakStore>(context);
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Bankak Analytics',
+      title: 'Vault',
       locale: Locale(store.isArabic ? 'ar' : 'en'),
       supportedLocales: const [Locale('en'), Locale('ar')],
       localizationsDelegates: const [
