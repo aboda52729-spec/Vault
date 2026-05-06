@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import 'sms_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -65,9 +66,12 @@ class BankakTransaction {
 
 class BankakStore extends ChangeNotifier {
   final SharedPreferences _prefs;
+  final SmsService _smsService = SmsService();
+  
   double _balance = 0.0;
   List<BankakTransaction> _transactions = [];
   bool _isArabic = true;
+  bool _isSyncing = false;
 
   BankakStore(this._prefs) {
     _loadData();
@@ -76,6 +80,7 @@ class BankakStore extends ChangeNotifier {
   double get balance => _balance;
   List<BankakTransaction> get transactions => _transactions;
   bool get isArabic => _isArabic;
+  bool get isSyncing => _isSyncing;
 
   void _loadData() {
     _balance = _prefs.getDouble('balance') ?? 0.0;
@@ -107,40 +112,75 @@ class BankakStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  void processBankakSMS(String sms) {
-    // SIMULATED PARSER LOGIC
-    // Example: "Bank of Khartoum: Your account ending in 1234 has been debited by 5,000 SDG. Balance: 150,000 SDG."
-    // Example (Arabic): "بنك الخرطوم: تم خصم 5,000 ج.س من حسابك... الرصيد الحالي: 150,000 ج.س"
-    
-    final amountMatch = RegExp(r'(\d{1,3}(,\d{3})*(\.\d+)?)').firstMatch(sms);
-    if (amountMatch != null) {
-      final amountStr = amountMatch.group(0)!.replaceAll(',', '');
-      final amount = double.tryParse(amountStr) ?? 0.0;
+  Future<void> syncWithPhoneSMS() async {
+    _isSyncing = true;
+    notifyListeners();
+
+    try {
+      final messages = await _smsService.getBankakMessages();
+      if (messages.isEmpty) return;
+
+      _transactions.clear();
       
-      final isDebit = sms.contains('debited') || sms.contains('خصم') || sms.contains('سحب');
-      final newBalanceAfter = isDebit ? _balance - amount : _balance + amount;
+      // Sort oldest to newest
+      messages.sort((a, b) => (a.date ?? DateTime.now()).compareTo(b.date ?? DateTime.now()));
 
-      final tx = BankakTransaction(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        amount: amount,
-        description: isDebit ? "Simulated Bankak Deduction" : "Simulated Bankak Deposit",
-        category: _autoCategorize(sms),
-        date: DateTime.now(),
-        type: isDebit ? TransactionType.debit : TransactionType.credit,
-        balanceAfter: newBalanceAfter,
-      );
+      for (var msg in messages) {
+        if (msg.body == null) continue;
+        final sms = msg.body!;
+        
+        // Match the first number sequence for the amount
+        final amountMatch = RegExp(r'(\d{1,3}(,\d{3})*(\.\d+)?)').firstMatch(sms);
+        if (amountMatch != null) {
+          final amountStr = amountMatch.group(0)!.replaceAll(',', '');
+          final amount = double.tryParse(amountStr) ?? 0.0;
+          
+          final isDebit = sms.contains('debited') || sms.contains('خصم') || sms.contains('سحب') || sms.contains('شراء');
+          
+          // Try to extract the remaining balance from the SMS
+          double balanceAfter = 0.0;
+          final balanceMatch = RegExp(r'(الرصيد:|الرصيد الحالي:|Balance:)\s*(\d{1,3}(,\d{3})*(\.\d+)?)').firstMatch(sms);
+          
+          if (balanceMatch != null) {
+             final balStr = balanceMatch.group(2)!.replaceAll(',', '');
+             balanceAfter = double.tryParse(balStr) ?? 0.0;
+             _balance = balanceAfter; // Update our global balance to the latest known accurate balance
+          } else {
+             _balance = isDebit ? _balance - amount : _balance + amount;
+             balanceAfter = _balance;
+          }
 
-      _transactions.insert(0, tx);
-      _balance = newBalanceAfter;
+          final tx = BankakTransaction(
+            id: msg.id?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString(),
+            amount: amount,
+            description: _extractDescription(sms, isDebit),
+            category: _autoCategorize(sms),
+            date: msg.date ?? DateTime.now(),
+            type: isDebit ? TransactionType.debit : TransactionType.credit,
+            balanceAfter: balanceAfter,
+          );
+
+          _transactions.insert(0, tx); // Newest first
+        }
+      }
       _saveData();
+    } finally {
+      _isSyncing = false;
       notifyListeners();
     }
   }
 
+  String _extractDescription(String sms, bool isDebit) {
+    if (sms.contains('كهرباء') || sms.toLowerCase().contains('electricity')) return 'Electricity Token';
+    if (sms.contains('رصيد') || sms.toLowerCase().contains('topup')) return 'Mobile Top-up';
+    return isDebit ? 'Expense' : 'Deposit';
+  }
+
   String _autoCategorize(String sms) {
-    if (sms.contains('electricity') || sms.contains('كهرباء')) return 'Bills';
+    if (sms.contains('electricity') || sms.contains('كهرباء')) return 'Utilities';
     if (sms.contains('restaurant') || sms.contains('مطعم')) return 'Food';
     if (sms.contains('transfer') || sms.contains('تحويل')) return 'Transfer';
+    if (sms.contains('رصيد') || sms.contains('زين') || sms.contains('سوداني')) return 'Telecom';
     return 'Other';
   }
 
@@ -223,15 +263,15 @@ class MainDashboard extends StatelessWidget {
                   _BalanceCard(store: store),
                   const SizedBox(height: 30),
                   _SectionHeader(
-                    title: store.isArabic ? 'محاكاة رسائل بنكك' : 'Simulate Bankak SMS',
-                    subtitle: store.isArabic ? 'اختبر كيف يقرأ التطبيق بياناتك' : 'Test how the app reads your data',
+                    title: store.isArabic ? 'مزامنة حقيقية' : 'Real Sync',
+                    subtitle: store.isArabic ? 'اسحب بياناتك مباشرة من الرسائل' : 'Fetch data directly from SMS',
                   ),
                   const SizedBox(height: 15),
-                  _SmsSimulationPanel(store: store),
+                  _RealSyncPanel(store: store),
                   const SizedBox(height: 30),
                   _SectionHeader(
-                    title: store.isArabic ? 'العمليات الأخيرة' : 'Recent Transactions',
-                    subtitle: store.isArabic ? 'مزامنة تلقائية من الرسائل' : 'Auto-synced from SMS',
+                    title: store.isArabic ? 'العمليات السابقة' : 'Past Transactions',
+                    subtitle: store.isArabic ? 'مزامنة من صندوق الوارد' : 'Synced from Inbox',
                   ),
                   const SizedBox(height: 15),
                 ],
@@ -255,51 +295,16 @@ class MainDashboard extends StatelessWidget {
                   opacity: 0.5,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
-                    children: const [
-                      Icon(Icons.history_rounded, size: 64),
-                      SizedBox(height: 10),
+                    children: [
+                      const Icon(Icons.history_rounded, size: 64),
+                      const SizedBox(height: 10),
+                      Text(store.isArabic ? 'لا توجد بيانات، قم بالمزامنة' : 'No data, please sync'),
                     ],
                   ),
                 ),
               ),
             ),
           const SliverPadding(padding: EdgeInsets.only(bottom: 100)),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          _showSetBalanceDialog(context, store);
-        },
-        label: Text(store.isArabic ? 'تعديل الرصيد' : 'Adjust Balance'),
-        icon: const Icon(Icons.account_balance_wallet_rounded),
-      ),
-    );
-  }
-
-  void _showSetBalanceDialog(BuildContext context, BankakStore store) {
-    final controller = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(store.isArabic ? 'تعيين الرصيد الحالي' : 'Set Current Balance'),
-        content: TextField(
-          controller: controller,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(
-            hintText: '0.00',
-            suffixText: 'SDG',
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: Text(store.isArabic ? 'إلغاء' : 'Cancel')),
-          ElevatedButton(
-            onPressed: () {
-              final val = double.tryParse(controller.text) ?? 0.0;
-              store.setInitialBalance(val);
-              Navigator.pop(context);
-            },
-            child: Text(store.isArabic ? 'حفظ' : 'Save'),
-          ),
         ],
       ),
     );
@@ -403,14 +408,15 @@ class _SectionHeader extends StatelessWidget {
   }
 }
 
-class _SmsSimulationPanel extends StatelessWidget {
+class _RealSyncPanel extends StatelessWidget {
   final BankakStore store;
-  const _SmsSimulationPanel({required this.store});
+  const _RealSyncPanel({required this.store});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(15),
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(20),
@@ -418,57 +424,35 @@ class _SmsSimulationPanel extends StatelessWidget {
       ),
       child: Column(
         children: [
-          _SmsButton(
-            label: 'Deduction (English)',
-            sms: 'Bank of Khartoum: Your account has been debited by 12,500.00 SDG. Ref: 98765. Balance: 137,500.00 SDG.',
-            onTap: () => store.processBankakSMS('Bank of Khartoum: Your account has been debited by 12,500.00 SDG. Ref: 98765. Balance: 137,500.00 SDG.'),
+          Icon(Icons.sync_rounded, size: 40, color: Colors.blueAccent),
+          const SizedBox(height: 15),
+          Text(
+            store.isArabic 
+              ? 'سيطلب التطبيق إذن قراءة الرسائل لسحب تاريخ معاملاتك من بنك الخرطوم تلقائياً.' 
+              : 'The app will request SMS permission to automatically pull your transaction history from Bank of Khartoum.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.7)),
           ),
-          const Divider(height: 20, color: Colors.white10),
-          _SmsButton(
-            label: 'إيداع (عربي)',
-            sms: 'بنك الخرطوم: تم إيداع 25,000.00 ج.س في حسابك. الرصيد الحالي: 162,500.00 ج.س',
-            onTap: () => store.processBankakSMS('بنك الخرطوم: تم إيداع 25,000.00 ج.س في حسابك. الرصيد الحالي: 162,500.00 ج.س'),
-          ),
-          const Divider(height: 20, color: Colors.white10),
-          _SmsButton(
-            label: 'Electricity (Arabic)',
-            sms: 'بنك الخرطوم: تم خصم 3,000.00 ج.س مقابل كهرباء. المرجع: 1122. الرصيد: 159,500.00 ج.س',
-            onTap: () => store.processBankakSMS('بنك الخرطوم: تم خصم 3,000.00 ج.س مقابل كهرباء. المرجع: 1122. الرصيد: 159,500.00 ج.س'),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blueAccent,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+              ),
+              onPressed: store.isSyncing ? null : () => store.syncWithPhoneSMS(),
+              child: store.isSyncing
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                  : Text(
+                      store.isArabic ? 'بدء المزامنة من الرسائل' : 'Start SMS Sync',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                    ),
+            ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _SmsButton extends StatelessWidget {
-  final String label;
-  final String sms;
-  final VoidCallback onTap;
-  const _SmsButton({required this.label, required this.sms, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8.0),
-        child: Row(
-          children: [
-            const Icon(Icons.sms_rounded, size: 16, color: Colors.blueAccent),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  Text(sms, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, color: Colors.white38)),
-                ],
-              ),
-            ),
-            const Icon(Icons.chevron_right_rounded, size: 16, color: Colors.white24),
-          ],
-        ),
       ),
     );
   }

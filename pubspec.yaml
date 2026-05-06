@@ -36,6 +36,8 @@ dependencies:
   intl: any
   provider: ^6.1.2
   shared_preferences: ^2.5.2
+  flutter_sms_inbox: any
+  permission_handler: any
   flutter_localizations:
     sdk: flutter
 
