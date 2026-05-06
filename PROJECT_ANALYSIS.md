@@ -45,18 +45,39 @@ Bankak Analytics is a Flutter application designed to automate the tracking of f
 
 ---
 
-## 4. Security & Privacy Roadmap (Gold Standard)
+## 4. Truth-Source Synchronization Strategy (Solving Calculation Drift)
+
+To ensure the app's balance is **always 100% accurate** and matches the real "Bankak" balance, we have implemented a "Truth-Source" logic:
+
+1.  **Reporting vs. Calculating:** Instead of adding/subtracting from a local variable, the app now treats the **Balance mentioned in the SMS** as the absolute truth.
+2.  **State Sync:** Every time an SMS is parsed, the app searches for keywords like `Balance`, `الرصيد`, or `رصيدك`. The number following these keywords is used to overwrite the local balance.
+3.  **Error Correction:** If a message is missed, the *next* message received will automatically correct the balance total because it contains the bank's own calculation of the remaining funds.
+
+---
+
+## 5. Background Synchronization Architecture
+
+For a truly "Live" and "Integrated" experience, the app will utilize a specialized background service:
+
+1.  **Persistent Listener (Android):** A Kotlin-based `BroadcastReceiver` that triggers on `android.provider.Telephony.SMS_RECEIVED`.
+2.  **Flutter Isolate:** When a message arrives, the system spawns a headless Flutter Isolate to parse the SMS text in the background, even if the app is closed.
+3.  **Local Database Update:** The parsed transaction is immediately written to `SecureStorage`, and a local notification is shown to the user with the updated balance.
+4.  **Foreground Service (Android 14):** Uses a `ForegroundService` with a low-priority notification to ensure the OS does not kill the listener during deep sleep.
+
+---
+
+## 6. Security & Privacy Roadmap (Gold Standard)
 
 To build a "Strong and Secure" infrastructure as requested, we must implement:
 
-1.  **Encryption at Rest:** All transaction IDs, amounts, and descriptions must be encrypted before being saved to the device disk.
+1.  **Encryption at Rest:** All transaction IDs, amounts, and descriptions must be encrypted before being saved to the device disk. (Status: **IMPLEMENTED FOUNDATION** using `flutter_secure_storage`).
 2.  **No Cloud Leakage:** Ensure no financial data is sent to external servers unless specifically requested for backup (and then, only with End-to-End Encryption).
 3.  **Biometric Lock:** Add an optional Fingerprint/FaceID lock to open the app.
 4.  **Sensitive Data Masking:** In the UI, allow the user to "Hide Balance" with a single tap (Privacy Mode).
 
 ---
 
-## 5. Technical Challenges (Android 14)
+## 7. Technical Challenges (Android 14)
 
 Android 14 introduced strict rules for background tasks:
 - **Foreground Service Types:** We must declare `foregroundServiceType="specialUse"` or `dataSync` in `AndroidManifest.xml`.
@@ -64,7 +85,7 @@ Android 14 introduced strict rules for background tasks:
 
 ---
 
-## 6. Actionable Roadmap (Phase 2)
+## 8. Actionable Roadmap (Phase 2)
 
 ### Step 1: Infrastructure Upgrade
 - Replace `SharedPreferences` with `flutter_secure_storage`.

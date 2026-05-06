@@ -36,6 +36,7 @@ dependencies:
   intl: any
   provider: ^6.1.2
   shared_preferences: ^2.5.2
+  flutter_secure_storage: ^9.2.4
   flutter_localizations:
     sdk: flutter
 
