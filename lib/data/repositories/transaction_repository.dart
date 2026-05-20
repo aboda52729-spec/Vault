@@ -113,6 +113,11 @@ class TransactionRepository {
     _box.clear();
   }
 
+  Future<void> clearAll() async {
+    await _box.clear();
+    await _secureStorage.delete(key: _balanceKey);
+  }
+
   double get totalBalance {
     return _box.values.fold<double>(0, (sum, t) => t.isDebit ? sum - t.amount : sum + t.amount);
   }

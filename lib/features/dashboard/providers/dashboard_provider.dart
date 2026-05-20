@@ -36,6 +36,22 @@ class DashboardState {
     this.errorMessage,
   });
 
+  double get monthlyIncome {
+    final now = DateTime.now();
+    return transactions
+        .where((t) => !t.isDebit && t.date.month == now.month && t.date.year == now.year)
+        .fold<double>(0, (s, t) => s + t.amount);
+  }
+
+  double get monthlyExpense {
+    final now = DateTime.now();
+    return transactions
+        .where((t) => t.isDebit && t.date.month == now.month && t.date.year == now.year)
+        .fold<double>(0, (s, t) => s + t.amount);
+  }
+
+  List<BankakTransaction> get recentTransactions => transactions.take(10).toList();
+
   DashboardState copyWith({
     double? balance,
     List<BankakTransaction>? transactions,
